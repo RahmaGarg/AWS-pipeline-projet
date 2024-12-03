@@ -1,0 +1,101 @@
+---
+- name: Deploy Application using Docker
+  hosts: servers
+  gather_facts: True
+  become: yes
+
+  vars_files:
+    - ansible-vars.yaml  # Include your variables file
+
+  tasks:
+    # Ensure SSH connection is available
+    - name: Ensure SSH connection is available
+      ansible.builtin.wait_for:
+        port: 22
+        delay: 10
+        timeout: 100
+        search_regex: OpenSSH
+        host: '{{ ansible_host | default(inventory_hostname) }}'
+
+    # Install Docker and Docker Compose
+    - name: Install Docker and Docker Compose
+      apt:
+        name: "{{ docker_package_name }}"
+        state: present
+        update_cache: yes
+        cache_valid_time: "{{ cache_time }}"
+
+    # Install Docker Compose
+    - name: Install Docker Compose
+      apt:
+        name: docker-compose
+        state: present
+
+    # Ensure Docker service is started
+    - name: Ensure Docker service is started
+      systemd:
+        name: "{{ docker_service_name }}"
+        state: started
+        enabled: yes
+
+    # Check Docker version
+    - name: Check Docker version
+      command: docker --version
+      register: docker_version_output
+
+    # Display Docker version
+    - name: Display Docker version
+      debug:
+        msg: "Docker version: {{ docker_version_output.stdout }}"
+
+    # Check Docker Compose version
+    - name: Check Docker Compose version
+      command: docker-compose --version
+      register: docker_compose_version_output
+
+    # Display Docker Compose version
+    - name: Display Docker Compose version
+      debug:
+        msg: "Docker Compose version: {{ docker_compose_version_output.stdout }}"
+
+    # Add ubuntu user to docker group
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    # Reconnect to server session
+    - name: Reconnect to server session
+      meta: reset_connection
+
+    # Pull frontend Docker image from ECR to EC2 instance
+    - name: Pull Docker image for the frontend from ECR to EC2 instance
+      docker_image:
+        name: "{{ ecr_url }}/{{ ecr_repository }}:{{ frontend_image_tag }}"
+        source: pull
+
+    # Pull backend Docker image from ECR to EC2 instance
+    - name: Pull Docker image for the backend from ECR to EC2 instance
+      docker_image:
+        name: "{{ ecr_url }}/{{ ecr_repository }}:{{ backend_image_tag }}"
+        source: pull
+
+    # Additional tasks like Docker Compose (up) can go here
+    - name: Copy docker-compose.yaml to EC2 instance
+      copy:
+        src: "/home/rahma/Devops-Cloud-TP_ENIS/enis-app-tp/docker-compose.yml"
+        dest: "/home/ubuntu/docker-compose.yml"
+
+    - name: Start Docker containers using Docker Compose
+      docker_compose:
+        project_src: "/home/ubuntu"
+        state: present  # "present" means up, "absent" would stop and remove the containers
+
+    # Example: Run migrations inside backend container (if required)
+    - name: Run makemigrations inside backend container
+      command: docker exec {{ backend_container_name }} python manage.py makemigrations
+
+    - name: Run migrations inside backend container
+      command: docker exec {{ backend_container_name }} python manage.py migrate
+
